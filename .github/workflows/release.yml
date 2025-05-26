@@ -1,0 +1,82 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Build on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux-amd64
+          - runner: ubuntu-24.04-arm
+            os: linux-aarch64
+          - runner: windows-latest
+            os: windows
+          - runner: macos-latest
+            os: macos
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Prepare artifact
+        id: prep
+        run: |
+          BIN_NAME=clapper-${{ matrix.os }}
+          if [[ "${{ matrix.os }}" == "windows" ]]; then
+            BIN_NAME="${BIN_NAME}.exe"
+            cp target/release/clapper.exe "$BIN_NAME"
+          else
+            cp target/release/clapper "$BIN_NAME"
+          fi
+          echo "BIN_NAME=$BIN_NAME" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}
+          path: ${{ env.BIN_NAME }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts      
+          merge-multiple: true
+          
+      - name: Generate release name
+        id: release_name
+        run: echo "RELEASE_NAME=sha-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_NAME }}
+          name: ${{ env.RELEASE_NAME }}
+          prerelease: true
+          files: |
+            artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
